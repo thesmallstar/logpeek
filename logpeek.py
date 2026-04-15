@@ -277,6 +277,7 @@ body {
 }
 .btn-icon:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-lt); }
 .btn-icon svg { width: 14px; height: 14px; }
+.btn-time-toggle.active { color: var(--accent); border-color: rgba(91,127,255,0.25); background: var(--accent-glow); }
 
 /* ── Filter Bar (Include / Exclude) ──────────────────────────── */
 .filter-bar {
@@ -918,6 +919,9 @@ mark {
       <strong id="shown-count">0</strong> / <strong id="total-count">0</strong>
     </div>
     <div class="live-dot" title="Connected"></div>
+    <button class="btn-icon btn-time-toggle" id="time-toggle" onclick="toggleTimeFormat()" title="Toggle local/UTC time (T)">
+      <span id="time-toggle-label" style="font-family:var(--font-ui);font-size:0.62rem;font-weight:700;letter-spacing:0.02em;">LCL</span>
+    </button>
     <button class="btn-icon" onclick="toggleFilterBar()" title="Filters (F)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
     </button>
@@ -994,6 +998,7 @@ mark {
       <div class="guide-row"><div class="guide-keys"><span class="guide-key">I</span></div><div class="guide-desc">Focus include filter input</div></div>
       <div class="guide-row"><div class="guide-keys"><span class="guide-key">X</span></div><div class="guide-desc">Focus exclude filter input</div></div>
       <div class="guide-row"><div class="guide-keys"><span class="guide-key">C</span></div><div class="guide-desc">Clear all include/exclude filters</div></div>
+      <div class="guide-row"><div class="guide-keys"><span class="guide-key">T</span></div><div class="guide-desc">Toggle local / UTC timestamps</div></div>
       <div class="guide-row"><div class="guide-keys"><span class="guide-key">?</span></div><div class="guide-desc">Toggle this guide</div></div>
       <div class="guide-row"><div class="guide-keys"><span class="guide-key">1</span><span class="guide-key">2</span><span class="guide-key">3</span><span class="guide-key">4</span><span class="guide-key">5</span></div><div class="guide-desc">Toggle DBG / INF / WRN / ERR / RAW level</div></div>
     </div>
@@ -1033,11 +1038,22 @@ mark {
         The live indicator pulses green when connected to the file watcher.
       </div>
     </div>
+
+    <div class="guide-section">
+      <div class="guide-section-title">Settings</div>
+      <div class="guide-hint">
+        All settings (level filters, include/exclude tags, pinned fields, time format, filter bar state) are saved to <strong>localStorage</strong> and persist across reloads.
+      </div>
+      <div style="margin-top:10px;">
+        <button class="btn-action" onclick="clearSettings()" style="padding:5px 14px;font-size:0.78rem;">Reset all settings</button>
+      </div>
+    </div>
   </div>
 </div>
 
 <script>
 // ── State ──────────────────────────────────────────────────────
+const STORAGE_KEY = 'logpeek_settings';
 const allLines = [];
 let searchTerm = '';
 let activeFilters = { debug: true, info: true, warning: true, error: true, raw: true };
@@ -1047,7 +1063,64 @@ let autoScroll = true;
 let userScrolledUp = false;
 let guideOpen = false;
 let filterBarOpen = false;
-let pinnedFields = []; // array of dotted paths like "attributes.error"
+let pinnedFields = [];
+let timeFormat = 'local'; // 'local' or 'utc'
+
+// ── Settings persistence ──────────────────────────────────────
+function saveSettings() {
+  const settings = {
+    activeFilters,
+    includeTags,
+    excludeTags,
+    pinnedFields,
+    filterBarOpen,
+    timeFormat,
+  };
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch {}
+}
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (s.activeFilters) activeFilters = { ...activeFilters, ...s.activeFilters };
+    if (Array.isArray(s.includeTags)) includeTags = s.includeTags;
+    if (Array.isArray(s.excludeTags)) excludeTags = s.excludeTags;
+    if (Array.isArray(s.pinnedFields)) pinnedFields = s.pinnedFields;
+    if (typeof s.filterBarOpen === 'boolean') filterBarOpen = s.filterBarOpen;
+    if (s.timeFormat === 'local' || s.timeFormat === 'utc') timeFormat = s.timeFormat;
+  } catch {}
+}
+
+window.clearSettings = function() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  activeFilters = { debug: true, info: true, warning: true, error: true, raw: true };
+  includeTags = [];
+  excludeTags = [];
+  pinnedFields = [];
+  filterBarOpen = false;
+  timeFormat = 'local';
+  applySettingsToUI();
+  renderAll();
+};
+
+function applySettingsToUI() {
+  // Level chips
+  Object.keys(activeFilters).forEach(level => {
+    const chip = document.querySelector('.level-chip[data-level="' + level + '"]');
+    if (chip) chip.classList.toggle('active', activeFilters[level]);
+  });
+  // Filter bar
+  filterBar.classList.toggle('visible', filterBarOpen);
+  // Time toggle
+  updateTimeToggle();
+  // Tags
+  renderFilterTags();
+  renderPinnedBar();
+}
+
+loadSettings();
 
 const container = document.getElementById('log-container');
 const emptyState = document.getElementById('empty-state');
@@ -1092,6 +1165,20 @@ function formatTime(timeStr) {
   if (!timeStr) return '';
   try {
     if (timeStr.includes('T')) {
+      if (timeFormat === 'local') {
+        const d = new Date(timeStr);
+        if (!isNaN(d.getTime())) {
+          const y = d.getFullYear();
+          const mo = String(d.getMonth() + 1).padStart(2, '0');
+          const da = String(d.getDate()).padStart(2, '0');
+          const h = String(d.getHours()).padStart(2, '0');
+          const mi = String(d.getMinutes()).padStart(2, '0');
+          const s = String(d.getSeconds()).padStart(2, '0');
+          const ms = String(d.getMilliseconds()).padStart(3, '0');
+          return y + '-' + mo + '-' + da + ' ' + h + ':' + mi + ':' + s + '.' + ms;
+        }
+      }
+      // UTC / fallback: show raw
       const parts = timeStr.split('T');
       let time = parts[1];
       if (time && time.includes('.')) {
@@ -1174,11 +1261,13 @@ function renderFilterTags() {
 window.removeInclude = function(index) {
   includeTags.splice(index, 1);
   renderFilterTags();
+  saveSettings();
   renderAll();
 };
 window.removeExclude = function(index) {
   excludeTags.splice(index, 1);
   renderFilterTags();
+  saveSettings();
   renderAll();
 };
 
@@ -1188,6 +1277,7 @@ window.addInclude = function(text) {
   includeTags.push(trimmed);
   if (!filterBarOpen) toggleFilterBar();
   renderFilterTags();
+  saveSettings();
   renderAll();
 };
 window.addExclude = function(text) {
@@ -1196,6 +1286,7 @@ window.addExclude = function(text) {
   excludeTags.push(trimmed);
   if (!filterBarOpen) toggleFilterBar();
   renderFilterTags();
+  saveSettings();
   renderAll();
 };
 
@@ -1203,6 +1294,7 @@ window.clearAllFilters = function() {
   includeTags = [];
   excludeTags = [];
   renderFilterTags();
+  saveSettings();
   renderAll();
 };
 
@@ -1238,12 +1330,14 @@ window.togglePin = function(path, event) {
     pinnedFields.push(path);
   }
   renderPinnedBar();
+  saveSettings();
   renderAll();
 };
 
 window.removePin = function(index) {
   pinnedFields.splice(index, 1);
   renderPinnedBar();
+  saveSettings();
   renderAll();
 };
 
@@ -1272,10 +1366,33 @@ excludeInput.addEventListener('keydown', (e) => {
   }
 });
 
+// ── Time format toggle ────────────────────────────────────────
+function updateTimeToggle() {
+  const btn = document.getElementById('time-toggle');
+  const label = document.getElementById('time-toggle-label');
+  if (timeFormat === 'local') {
+    label.textContent = 'LCL';
+    btn.classList.add('active');
+    btn.title = 'Showing local time (T to toggle)';
+  } else {
+    label.textContent = 'UTC';
+    btn.classList.remove('active');
+    btn.title = 'Showing UTC time (T to toggle)';
+  }
+}
+
+window.toggleTimeFormat = function() {
+  timeFormat = timeFormat === 'local' ? 'utc' : 'local';
+  updateTimeToggle();
+  saveSettings();
+  renderAll();
+};
+
 // ── Filter bar toggle ─────────────────────────────────────────
 window.toggleFilterBar = function() {
   filterBarOpen = !filterBarOpen;
   filterBar.classList.toggle('visible', filterBarOpen);
+  saveSettings();
 };
 
 // ── Guide toggle ──────────────────────────────────────────────
@@ -1564,6 +1681,7 @@ window.toggleLevel = function(level) {
   activeFilters[level] = !activeFilters[level];
   const chip = document.querySelector('.level-chip[data-level="' + level + '"]');
   if (chip) chip.classList.toggle('active', activeFilters[level]);
+  saveSettings();
   renderAll();
 };
 
@@ -1641,6 +1759,9 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'c' || e.key === 'C') {
     clearAllFilters();
   }
+  if (e.key === 't' || e.key === 'T') {
+    toggleTimeFormat();
+  }
   if (e.key === '?') {
     toggleGuide();
   }
@@ -1701,8 +1822,7 @@ function connectSSE() {
 }
 
 // Init
-renderFilterTags();
-renderPinnedBar();
+applySettingsToUI();
 connectSSE();
 </script>
 </body>
