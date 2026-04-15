@@ -231,6 +231,7 @@ body {
 .lc-warning { background: var(--warn-bg);  color: var(--warn);  border-color: var(--warn-border); }
 .lc-error   { background: var(--error-bg); color: var(--error); border-color: var(--error-border); }
 .lc-debug   { background: var(--debug-bg); color: var(--debug); border-color: var(--debug-border); }
+.lc-raw     { background: var(--debug-bg); color: var(--text-muted); border-color: var(--debug-border); }
 
 .toolbar-right {
   display: flex;
@@ -526,6 +527,113 @@ body {
 .row-expand-icon svg { width: 10px; height: 10px; }
 .log-row.expanded .row-expand-icon { transform: rotate(90deg); color: var(--accent); }
 
+/* ── Pinned fields in row ────────────────────────────────────── */
+.row-pins {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 2px 18px 6px 86px;
+}
+.pin-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  background: rgba(91,127,255,0.06);
+  border: 1px solid rgba(91,127,255,0.12);
+  max-width: 400px;
+  overflow: hidden;
+}
+.pin-chip-key {
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 0.66rem;
+  text-transform: lowercase;
+  flex-shrink: 0;
+}
+.pin-chip-val {
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Pin icon in JSON tree */
+.json-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s;
+  vertical-align: middle;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.json-pin:hover { opacity: 1 !important; background: var(--bg-hover); color: var(--accent); }
+.json-pin.pinned { opacity: 0.7; color: var(--accent); }
+/* Show pin icon on row hover */
+.json-tree:hover .json-pin { opacity: 0.3; }
+.json-pin svg { width: 10px; height: 10px; }
+
+/* Pinned fields bar (under toolbar) */
+.pinned-bar {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 18px;
+  background: var(--bg-filter);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.pinned-bar.visible { display: flex; }
+.pinned-bar-label {
+  font-family: var(--font-ui);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--accent-glow);
+  border: 1px solid rgba(91,127,255,0.12);
+}
+.pinned-field-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 8px;
+  border-radius: var(--radius-tag);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  background: var(--accent-glow);
+  color: var(--accent);
+  border: 1px solid rgba(91,127,255,0.15);
+  animation: tagIn 0.15s ease-out;
+}
+.pinned-field-tag .tag-remove {
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.1s;
+  display: flex;
+  align-items: center;
+  padding: 1px;
+}
+.pinned-field-tag .tag-remove:hover { opacity: 1; }
+.pinned-field-tag .tag-remove svg { width: 10px; height: 10px; }
+
 /* ── Expanded Detail ─────────────────────────────────────────── */
 .row-detail {
   display: none;
@@ -802,6 +910,7 @@ mark {
     <div class="level-chip lc-info active"     data-level="info"    onclick="toggleLevel('info')">INF</div>
     <div class="level-chip lc-warning active"  data-level="warning" onclick="toggleLevel('warning')">WRN</div>
     <div class="level-chip lc-error active"    data-level="error"   onclick="toggleLevel('error')">ERR</div>
+    <div class="level-chip lc-raw active"      data-level="raw"     onclick="toggleLevel('raw')">RAW</div>
   </div>
 
   <div class="toolbar-right">
@@ -835,6 +944,12 @@ mark {
   </div>
 
   <span class="filter-clear" id="filter-clear" onclick="clearAllFilters()">Clear all</span>
+</div>
+
+<!-- Pinned Fields Bar -->
+<div class="pinned-bar" id="pinned-bar">
+  <span class="pinned-bar-label">Pinned</span>
+  <div id="pinned-field-tags" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;"></div>
 </div>
 
 <!-- Column headers -->
@@ -880,7 +995,7 @@ mark {
       <div class="guide-row"><div class="guide-keys"><span class="guide-key">X</span></div><div class="guide-desc">Focus exclude filter input</div></div>
       <div class="guide-row"><div class="guide-keys"><span class="guide-key">C</span></div><div class="guide-desc">Clear all include/exclude filters</div></div>
       <div class="guide-row"><div class="guide-keys"><span class="guide-key">?</span></div><div class="guide-desc">Toggle this guide</div></div>
-      <div class="guide-row"><div class="guide-keys"><span class="guide-key">1</span><span class="guide-key">2</span><span class="guide-key">3</span><span class="guide-key">4</span></div><div class="guide-desc">Toggle DBG / INF / WRN / ERR level</div></div>
+      <div class="guide-row"><div class="guide-keys"><span class="guide-key">1</span><span class="guide-key">2</span><span class="guide-key">3</span><span class="guide-key">4</span><span class="guide-key">5</span></div><div class="guide-desc">Toggle DBG / INF / WRN / ERR / RAW level</div></div>
     </div>
 
     <div class="guide-section">
@@ -898,6 +1013,16 @@ mark {
       <div class="guide-hint">
         Click any log row to expand its full JSON. In the expanded view, use <strong>Include msg</strong> or <strong>Exclude msg</strong> buttons to quickly filter by that log's message text.
         Use <strong>Copy JSON</strong> to copy the pretty-printed log entry to your clipboard.
+      </div>
+    </div>
+
+    <div class="guide-section">
+      <div class="guide-section-title">Pinned fields</div>
+      <div class="guide-hint">
+        Expand a JSON log row and hover over any value &mdash; a <strong>pin icon</strong> appears.
+        Click it to pin that field to the main row view across all log entries.
+        Pinned fields show as small chips beneath each row&rsquo;s message.
+        Click the pin icon again (or the &times; in the pinned bar) to unpin.
       </div>
     </div>
 
@@ -922,6 +1047,7 @@ let autoScroll = true;
 let userScrolledUp = false;
 let guideOpen = false;
 let filterBarOpen = false;
+let pinnedFields = []; // array of dotted paths like "attributes.error"
 
 const container = document.getElementById('log-container');
 const emptyState = document.getElementById('empty-state');
@@ -937,6 +1063,8 @@ const includeTagsEl = document.getElementById('include-tags');
 const excludeTagsEl = document.getElementById('exclude-tags');
 const guideOverlay = document.getElementById('guide-overlay');
 const filterClear = document.getElementById('filter-clear');
+const pinnedBar = document.getElementById('pinned-bar');
+const pinnedFieldTagsEl = document.getElementById('pinned-field-tags');
 
 // ── Helpers ────────────────────────────────────────────────────
 function escapeHtml(text) {
@@ -1078,6 +1206,59 @@ window.clearAllFilters = function() {
   renderAll();
 };
 
+// ── Pinned Fields ─────────────────────────────────────────────
+function getNestedValue(obj, path) {
+  const parts = path.split('.');
+  let current = obj;
+  for (const part of parts) {
+    if (current == null || typeof current !== 'object') return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+function shortFieldName(path) {
+  const parts = path.split('.');
+  return parts[parts.length - 1];
+}
+
+function formatPinValue(val) {
+  if (val === null) return 'null';
+  if (val === undefined) return '-';
+  if (typeof val === 'object') return JSON.stringify(val);
+  return String(val);
+}
+
+window.togglePin = function(path, event) {
+  if (event) event.stopPropagation();
+  const index = pinnedFields.indexOf(path);
+  if (index >= 0) {
+    pinnedFields.splice(index, 1);
+  } else {
+    pinnedFields.push(path);
+  }
+  renderPinnedBar();
+  renderAll();
+};
+
+window.removePin = function(index) {
+  pinnedFields.splice(index, 1);
+  renderPinnedBar();
+  renderAll();
+};
+
+function renderPinnedBar() {
+  pinnedBar.classList.toggle('visible', pinnedFields.length > 0);
+  pinnedFieldTagsEl.innerHTML = pinnedFields.map((field, i) =>
+    '<span class="pinned-field-tag">' +
+      escapeHtml(field) +
+      '<span class="tag-remove" onclick="removePin(' + i + ')">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
+      '</span>' +
+    '</span>'
+  ).join('');
+}
+
 includeInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     addInclude(includeInput.value);
@@ -1104,15 +1285,31 @@ window.toggleGuide = function() {
 };
 
 // ── JSON Tree Renderer ────────────────────────────────────────
-function renderJsonTree(data, depth, term) {
-  if (data === null) return '<span class="json-null">null</span>';
+const PIN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 17v5"/><path d="M5 17h14"/><path d="M15 3.28a2.18 2.18 0 0 1 2.7 2.7L16 9l2.69 2.69a1 1 0 0 1 0 1.41l-5.1 5.1a1 1 0 0 1-1.41 0L9 15l-3.02 1.7a2.18 2.18 0 0 1-2.7-2.7L5 11l-1.78-1.78a2 2 0 0 1 0-2.83l3.18-3.18a2 2 0 0 1 2.83 0z"/></svg>';
+
+function renderJsonTree(data, depth, term, path) {
+  if (data === null) {
+    let html = '<span class="json-null">null</span>';
+    if (path) html += pinIconHtml(path);
+    return html;
+  }
   if (data === undefined) return '<span class="json-null">undefined</span>';
 
   const type = typeof data;
-  if (type === 'boolean') return '<span class="json-bool">' + data + '</span>';
-  if (type === 'number')  return '<span class="json-num">' + data + '</span>';
+  if (type === 'boolean') {
+    let html = '<span class="json-bool">' + data + '</span>';
+    if (path) html += pinIconHtml(path);
+    return html;
+  }
+  if (type === 'number') {
+    let html = '<span class="json-num">' + data + '</span>';
+    if (path) html += pinIconHtml(path);
+    return html;
+  }
   if (type === 'string') {
-    return '<span class="json-str">' + highlightText('"' + data + '"', term) + '</span>';
+    let html = '<span class="json-str">' + highlightText('"' + data + '"', term) + '</span>';
+    if (path) html += pinIconHtml(path);
+    return html;
   }
 
   const isArray = Array.isArray(data);
@@ -1139,10 +1336,11 @@ function renderJsonTree(data, depth, term) {
 
   entries.forEach(([key, value], index) => {
     html += '\n' + indent;
+    const childPath = path ? path + '.' + key : String(key);
     if (!isArray) {
       html += '<span class="json-key">' + highlightText('"' + key + '"', term) + '</span>: ';
     }
-    html += renderJsonTree(value, depth + 1, term);
+    html += renderJsonTree(value, depth + 1, term, childPath);
     if (index < entries.length - 1) html += ',';
   });
 
@@ -1150,6 +1348,13 @@ function renderJsonTree(data, depth, term) {
   html += '<span class="json-brace">' + closeBrace + '</span>';
   html += '</span></span>';
   return html;
+}
+
+function pinIconHtml(path) {
+  const isPinned = pinnedFields.includes(path);
+  const cls = 'json-pin' + (isPinned ? ' pinned' : '');
+  const escapedPath = path.replace(/'/g, "\\'");
+  return ' <span class="' + cls + '" onclick="togglePin(\'' + escapedPath + '\',event)" title="Pin ' + escapeHtml(path) + ' to row view">' + PIN_SVG + '</span>';
 }
 
 window.toggleJsonNode = function(id) {
@@ -1204,7 +1409,7 @@ function createRowHtml(line) {
         '<button class="btn-action exclude-action" onclick="addExcludeFromRow(event,' + (line.lineNum - 1) + ')" title="Exclude this message">&minus; Exclude msg</button>' +
         '<button class="btn-action" onclick="copyLine(event,' + (line.lineNum - 1) + ')">Copy JSON</button>' +
       '</div>' +
-      '<div class="json-tree"><pre>' + renderJsonTree(line.parsed, 0, searchTerm) + '</pre></div>' +
+      '<div class="json-tree"><pre>' + renderJsonTree(line.parsed, 0, searchTerm, '') + '</pre></div>' +
     '</div>';
   } else {
     detailHtml = '<div class="row-detail">' +
@@ -1217,6 +1422,22 @@ function createRowHtml(line) {
     '</div>';
   }
 
+  // Pinned fields row
+  let pinsHtml = '';
+  if (line.isJson && line.parsed && pinnedFields.length > 0) {
+    let chips = '';
+    for (const field of pinnedFields) {
+      const val = getNestedValue(line.parsed, field);
+      if (val !== undefined) {
+        const displayVal = formatPinValue(val);
+        chips += '<span class="pin-chip"><span class="pin-chip-key">' + escapeHtml(shortFieldName(field)) + '</span><span class="pin-chip-val">' + highlightText(displayVal, searchTerm) + '</span></span>';
+      }
+    }
+    if (chips) {
+      pinsHtml = '<div class="row-pins">' + chips + '</div>';
+    }
+  }
+
   return '<div class="log-row ' + levelClass + '" data-line="' + line.lineNum + '" onclick="toggleRow(this,event)">' +
     '<div class="row-main">' +
       '<div class="row-line">' + line.lineNum + '</div>' +
@@ -1225,6 +1446,7 @@ function createRowHtml(line) {
       msgHtml +
       '<div class="row-expand-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>' +
     '</div>' +
+    pinsHtml +
     detailHtml +
   '</div>';
 }
@@ -1427,6 +1649,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '2') toggleLevel('info');
   if (e.key === '3') toggleLevel('warning');
   if (e.key === '4') toggleLevel('error');
+  if (e.key === '5') toggleLevel('raw');
 });
 
 // ── SSE - Load initial data + live tail ───────────────────────
@@ -1479,6 +1702,7 @@ function connectSSE() {
 
 // Init
 renderFilterTags();
+renderPinnedBar();
 connectSSE();
 </script>
 </body>
